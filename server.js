@@ -5,10 +5,8 @@ app.get('/', (req, res) => {
   res.send('✅ ritsatv-proxy работает!');
 });
 
-// Прокси без /proxy в URL
+// Прокси для всего
 app.use(async (req, res) => {
-  if (req.path === '/') return;
-
   const targetUrl = `https://liveovh010.cda.pl${req.originalUrl}`;
 
   try {
@@ -16,36 +14,47 @@ app.use(async (req, res) => {
       headers: {
         'Referer': 'https://iptv-web.app/PL/DisneyChannel.pl/',
         'Origin': 'https://iptv-web.app',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36'
       }
     });
 
-    res.set('Access-Control-Allow-Origin', '*');
-    res.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    // CORS
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', '*');
 
     if (req.path.endsWith('.m3u8')) {
       let text = await response.text();
-      const base = `https://${req.get('host')}`;
+      const baseUrl = `https://${req.get('host')}`;
 
-      text = text.replace(/^(?!#)(?!\s*$)(?!https?:\/\/)(.+)$/gm, m => base + (m.startsWith('/') ? '' : '/') + m);
-      
-      text = text.replace(/(URI\s*=\s*["'])([^"']+)(["'])/gi, (_, p1, p2, p3) => {
-        return p2.startsWith('http') ? _ : `${p1}${base}/${p2}${p3}`;
+      // Переписываем все относительные ссылки
+      text = text.replace(/^(?!#)(?!\s*$)(?!https?:\/\/)(.+)$/gm, (match) => {
+        return baseUrl + (match.startsWith('/') ? '' : '/') + match;
       });
 
-      res.set('Content-Type', 'application/vnd.apple.mpegurl');
+      // Переписываем URI= в #EXT-X-MEDIA
+      text = text.replace(/(URI\s*=\s*["'])([^"']+)(["'])/gi, (_, p1, p2, p3) => {
+        if (!p2.startsWith('http')) {
+          return `${p1}${baseUrl}/${p2}${p3}`;
+        }
+        return _;
+      });
+
+      res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
       return res.send(text);
     }
 
-    // Для сегментов mp4
-    res.set('Content-Type', response.headers.get('content-type') || 'video/mp4');
-    response.body.pipe(res);
+    // Для .mp4 сегментов
+    res.setHeader('Content-Type', response.headers.get('content-type') || 'video/mp4');
+    return response.body.pipe(res);
 
   } catch (err) {
-    console.error(err);
-    res.status(502).send('Proxy Error');
+    console.error('Proxy error:', err);
+    res.status(502).send('Proxy Error: ' + err.message);
   }
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Proxy on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Proxy running on port ${PORT}`);
+});
