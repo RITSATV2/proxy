@@ -1,18 +1,17 @@
 const express = require('express');
 const app = express();
-const PORT = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
-  res.send('✅ ritsatv-proxy на Render работает!');
+  res.send('✅ ritsatv-proxy работает!');
 });
 
-// Главный прокси
-app.use('/proxy', async (req, res) => {
-  const originalUrl = req.url.replace('/proxy', ''); // убираем /proxy
-  
+// Прокси без /proxy в URL
+app.use(async (req, res) => {
+  if (req.path === '/') return;
+
+  const targetUrl = `https://liveovh010.cda.pl${req.originalUrl}`;
+
   try {
-    const targetUrl = `https://liveovh010.cda.pl${originalUrl}`;
-    
     const response = await fetch(targetUrl, {
       headers: {
         'Referer': 'https://iptv-web.app/PL/DisneyChannel.pl/',
@@ -21,37 +20,32 @@ app.use('/proxy', async (req, res) => {
       }
     });
 
-    // Копируем заголовки
     res.set('Access-Control-Allow-Origin', '*');
     res.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
 
-    if (originalUrl.endsWith('.m3u8')) {
+    if (req.path.endsWith('.m3u8')) {
       let text = await response.text();
-      const myDomain = `https://${req.get('host')}/proxy`;
+      const base = `https://${req.get('host')}`;
 
-      // Переписываем ссылки
-      text = text.replace(/^(?!#)(?!\s*$)(?!https?:\/\/)(.+)$/gm, m => {
-        return myDomain + (m.startsWith('/') ? '' : '/') + m;
-      });
+      text = text.replace(/^(?!#)(?!\s*$)(?!https?:\/\/)(.+)$/gm, m => base + (m.startsWith('/') ? '' : '/') + m);
       
       text = text.replace(/(URI\s*=\s*["'])([^"']+)(["'])/gi, (_, p1, p2, p3) => {
-        return p2.startsWith('http') ? _ : `${p1}${myDomain}/${p2}${p3}`;
+        return p2.startsWith('http') ? _ : `${p1}${base}/${p2}${p3}`;
       });
 
       res.set('Content-Type', 'application/vnd.apple.mpegurl');
       return res.send(text);
     }
 
-    // Для .mp4 сегментов просто проксируем
-    res.set('Content-Type', response.headers.get('content-type'));
+    // Для сегментов mp4
+    res.set('Content-Type', response.headers.get('content-type') || 'video/mp4');
     response.body.pipe(res);
 
   } catch (err) {
     console.error(err);
-    res.status(500).send('Proxy error');
+    res.status(502).send('Proxy Error');
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Proxy running on port ${PORT}`);
-});
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Proxy on port ${PORT}`));
